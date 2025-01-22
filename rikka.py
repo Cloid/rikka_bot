@@ -12,10 +12,14 @@ from collections import deque
 
 import yt_dlp
 
+# load env vars
+load_dotenv()
+
+
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 description = '''WIP Music Bot for my server'''
 
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # Bot Configuration
 intents = discord.Intents.default()
@@ -30,6 +34,13 @@ queue = deque()
 
 # check to check if bot is playing
 is_playing = False
+
+@bot.event
+async def on_ready():
+    # Set bot status as a bio message
+    activity = discord.Game("shitty music")  # You can customize the message here
+    await bot.change_presence(activity=activity)
+
 
 @bot.command()
 async def join(ctx):
