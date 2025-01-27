@@ -1,9 +1,9 @@
 from dotenv import load_dotenv
-
 import os
 
 import asyncio
 import random
+import requests
 
 import discord
 from discord.ext import commands
@@ -12,14 +12,39 @@ from collections import deque
 
 import yt_dlp
 
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+
+import re
+
 # load env vars
 load_dotenv()
-
-
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+
+# Spotify Developer App credentials
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+redirect_uri = os.getenv("redirect_uri")
+
+# define spotify scope
+scope = "user-library-read user-read-playback-state user-modify-playback-state"
+sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=SPOTIFY_CLIENT_ID,
+                                                client_secret=SPOTIFY_CLIENT_SECRET,
+                                                redirect_uri=redirect_uri,
+                                                scope=scope))
+
+
+# define cookies:
+cookies = "cookies.txt"
 
 description = '''WIP Music Bot for my server'''
 
+
+# results = sp.search(q="Never Gonna Give You Up", type="track", limit=1)
+# for track in results["tracks"]["items"]:
+#     print(f"Track Name: {track['name']}")
+#     print(f"Artist: {track['artists'][0]['name']}")
+#     print(f"URL: {track['external_urls']['spotify']}")
 
 # Bot Configuration
 intents = discord.Intents.default()
@@ -61,12 +86,35 @@ async def play(ctx, url):
     if not await join_voice_channel(ctx):
         return
 
-    # conditional for youtube videos link is valid
-    # also conditional for spotify
-    await addToQueue(ctx, url, True)
+    url_type = await get_link_type(url)
 
-    if not is_playing:
-            await play_next(ctx)
+    if url_type == "spotify":
+        await ctx.send('spotify')
+        await get_spotify_track_info(ctx, url)
+        return
+
+    if await check_youtubeurl(url) != False:
+
+        # conditional for youtube videos link is valid
+        # also conditional for spotify
+        await addToQueue(ctx, url, True)
+
+        if not is_playing:
+                await play_next(ctx)
+    else:
+        await ctx.send("Invalid youtube url! Try a different url")
+
+# @bot.command()
+# async def test(ctx):
+#     embed = discord.Embed(
+#         color=discord.Color.dark_red(),
+#         description="this is description",
+#         title="this is title"
+#     )
+#     embed.set_footer(text="footer")
+#     embed.set_author(name="author")
+#
+#     await ctx.send(embed=embed)
 
 @bot.command()
 async def skip(ctx):
@@ -162,8 +210,11 @@ async def play_current_yt_song(ctx, url):
             vc.source.volume = 0.5
 
             await ctx.send(f"Now playing: {info['title']}")
+
     except Exception as e:
         await ctx.send(f"An error occured: {e}")
+        await ctx.send("Playing next song if available.")
+        await play_next(ctx)
 
 # handles whether to add on front or back of queue
 async def addToQueue(ctx, url, addToBack):
@@ -177,5 +228,44 @@ async def addToQueue(ctx, url, addToBack):
 
 async def clearQueue():
     queue.clear()
+
+async def check_youtubeurl(url):
+    request = requests.get(url)
+    return request.status_code == 200
+
+async def get_link_type(url):
+    # Regex patterns for spotify and youtube
+    spotify_pattern = r"https?://open\.spotify\.com/.*"
+    youtube_pattern = r"https?://(www\.)?(youtube\.com|youtu\.be)/.*"
+
+    if re.match(spotify_pattern, url):
+        return "spotify"
+    elif re.match(youtube_pattern, url):
+        return "youtube"
+    else:
+        return "unknown"
+
+async def get_spotify_track_info(ctx, spotify_url):
+    try:
+        track_info = sp.track(spotify_url)
+        track_name = track_info["name"]
+        artists = [artist["name"] for artist in track_info["artists"]]
+        artist_names_str = ", ".join(artists)
+        search_query = f"{track_name} {artist_names_str}"
+
+    # Search on YouTube
+        ydl_opts = {'cookiefile': cookies,"format": "bestaudio/best", "quiet": True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            search_results = ydl.extract_info(f"ytsearch:{search_query}", download=False)
+            video_url = search_results["entries"][0]["url"]
+
+        # Play the audio in Discord
+        if ctx.voice_client is None:
+            await ctx.author.voice.channel.connect()
+        ctx.voice_client.play(discord.FFmpegPCMAudio(video_url))
+        await ctx.send(f"Now playing: {track_name} by {artist_names_str}")
+
+    except Exception as e:
+        await ctx.send(f"Error: {e}")
 
 bot.run(DISCORD_TOKEN)
