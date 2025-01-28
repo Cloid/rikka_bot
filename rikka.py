@@ -7,6 +7,7 @@ import requests
 
 import discord
 from discord.ext import commands
+from discord import FFmpegPCMAudio
 
 from collections import deque
 
@@ -38,6 +39,12 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=SPOTIFY_CLIENT_ID,
 cookies = "cookies.txt"
 
 description = '''WIP Music Bot for my server'''
+
+# Radio Browser API endpoint
+RADIO_BROWSER_API = "http://at1.api.radio-browser.info/json"
+
+# FFmpeg path (ensure FFmpeg is installed and in your PATH)
+FFMPEG_PATH = "ffmpeg"
 
 
 # results = sp.search(q="Never Gonna Give You Up", type="track", limit=1)
@@ -149,6 +156,86 @@ async def shuffle(ctx):
     else:
         await ctx.send("The queue is empty.")
 
+
+@bot.command()
+async def radio_list(ctx):
+
+    state = "Los Angeles, California"
+    response = requests.get(f"{RADIO_BROWSER_API}/stations/bystate/{state}")
+
+    if response.status_code != 200:
+        await ctx.send(f"Failed to fetch radio stations for {state}. Status code: {response.status_code}")
+        return
+
+    try:
+        stations = response.json()
+    except ValueError:
+        await ctx.send("Error: Received invalid JSON from the Radio Browser API.")
+        return
+
+
+    if stations:
+        await ctx.send(f"Here are some radio stations in Los Angeles:\n" + "\n".join([station.get("name") for station in stations]))
+    else:
+        await ctx.send("No radio stations found for Los Angeles, California.")
+
+    await ctx.send("Which station would you like to play?")
+
+    async def check(msg):
+        if (msg.author == ctx.author and msg.channel == ctx.channel):
+            return True
+        return False
+
+    try:
+        # Wait for a response with a timeout of 60 seconds
+        response = await bot.wait_for('message', timeout=60.0, check=check)
+
+        for station in stations:
+            if response.content.lower() in station.get('name').lower():
+
+                await ctx.send(f"Found staition playing: {response.content}")
+
+                if (await join_voice_channel(ctx)) is True:
+                    vc = ctx.voice_client
+                    vc.play(FFmpegPCMAudio(executable=FFMPEG_PATH, source=station.get("url")))
+                    return True
+
+        await ctx.send("Couldn't find station")
+        return False
+
+    except asyncio.TimeoutError:
+        await ctx.send("You took too long to respond!")
+
+@bot.command()
+async def stop_radio(ctx):
+
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        await ctx.send("Stopped the radio and disconnected.")
+    else:
+        await ctx.send("I'm not in a voice channel.")
+
+# @bot.command()
+# async def ask(ctx):
+#     # Send a message asking the user to respond
+#     await ctx.send("Do you want to play a song? Type 'yes' or 'no'.")
+#
+#     def check(msg):
+#         # Make sure the message is from the same user and in the same channel
+#         return msg.author == ctx.author and msg.channel == ctx.channel and msg.content.lower() in ['yes', 'no']
+#
+#     try:
+#         # Wait for a response with a timeout of 30 seconds
+#         response = await bot.wait_for('message', timeout=30.0, check=check)
+#
+#         if response.content.lower() == 'yes':
+#             await ctx.send("Great! Let's play a song!")
+#             # Your song playing logic here
+#         else:
+#             await ctx.send("Okay, maybe next time!")
+#     except asyncio.TimeoutError:
+#         await ctx.send("You took too long to respond!")
+
 # Helper functions
 
 # Joins voice channel
@@ -164,7 +251,7 @@ async def join_voice_channel(ctx):
     return True
 
 #  Plays the next available song
-async  def play_next(ctx):
+async def play_next(ctx):
     global is_playing
     if queue:
         is_playing = True
